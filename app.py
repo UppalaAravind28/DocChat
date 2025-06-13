@@ -150,11 +150,12 @@ def get_conversational_chain():
     If the context does not contain enough information to answer the question, respond with:
     "The answer is not available in the context."
 
-    Follow these rules:
+    Use the following rules:
     - Always base your answer strictly on the context.
-    - If the question requires multiple steps, explain each clearly.
-    - Use bullet points or numbered lists where appropriate.
-    - Keep your tone professional but easy to understand.
+    - Format answers with bullet points, numbered lists, and clear paragraphs.
+    - When appropriate, use emojis to make the response more engaging.
+    - Avoid markdown syntax if possible, but use it when needed for structure.
+    - Keep your tone professional but friendly.
 
     Context:
     {context}
@@ -164,6 +165,11 @@ def get_conversational_chain():
 
     Answer:
     """
+
+    model = ChatGoogleGenerativeAI(model="gemini-2.0-flash-lite", temperature=0.3)
+    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
+    return chain
 
     model = ChatGoogleGenerativeAI(model="gemini-2.0-flash-lite", temperature=0.3)
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
