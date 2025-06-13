@@ -152,10 +152,11 @@ def get_conversational_chain():
 
     Use the following rules:
     - Always base your answer strictly on the context.
-    - Format answers with bullet points, numbered lists, and clear paragraphs.
+    - Format answers with bullet points, numbered lists, tables and clear paragraphs.
     - When appropriate, use emojis to make the response more engaging.
     - Avoid markdown syntax if possible, but use it when needed for structure.
     - Keep your tone professional but friendly.
+    - If the output contains the data along with data organize in table format for better presentation.
 
     Context:
     {context}
