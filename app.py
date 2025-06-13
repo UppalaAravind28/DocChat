@@ -9,6 +9,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
+from docx import Document
+import pandas as pd
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
+
 
 # Load environment variables
 load_dotenv()
@@ -22,7 +27,7 @@ if "vectorstore_loaded" not in st.session_state:
     st.session_state.vectorstore_loaded = False
 
 
-# --- NEW: Function to extract text from various file types ---
+# --- Function to extract text from various file types ---
 def get_text_from_file(file):
     file_extension = os.path.splitext(file.name)[1].lower()
 
@@ -31,7 +36,6 @@ def get_text_from_file(file):
         return "".join(page.extract_text() for page in pdf_reader.pages if page.extract_text())
 
     elif file_extension in [".xlsx", ".xls"]:
-        import pandas as pd
         df_dict = pd.read_excel(file, sheet_name=None)
         full_text = ""
         for sheet_name, df in df_dict.items():
@@ -40,12 +44,10 @@ def get_text_from_file(file):
         return full_text
 
     elif file_extension == ".csv":
-        import pandas as pd
         df = pd.read_csv(file)
         return df.to_string(index=False)
 
     elif file_extension == ".docx":
-        from docx import Document
         doc = Document(file)
         return "\n".join(paragraph.text for paragraph in doc.paragraphs)
 
@@ -53,14 +55,78 @@ def get_text_from_file(file):
         raise ValueError(f"Unsupported file type: {file_extension}")
 
 
-# --- Modified: Accept all supported file types ---
-def get_pdf_text(files):
+# --- Get text from web URL using Playwright + BeautifulSoup ---
+def get_web_text(url):
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, timeout=60000)
+            page.wait_for_timeout(5000)  # Wait for JS content
+            html = page.content()
+            browser.close()
+
+        # Use BeautifulSoup to clean HTML
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Remove scripts, styles, ads, banners, etc.
+        for script_or_style in soup(["script", "style", "nav", "footer", ".ad-banner", ".login-prompt"]):
+            script_or_style.decompose()
+
+        # Extract visible text
+        text = soup.get_text(separator="\n")
+        lines = (line.strip() for line in text.splitlines())
+        cleaned_text = '\n'.join(line for line in lines if line)
+
+        # Optional: Custom cleaning for specific websites
+        cleaned_text = clean_web_text(cleaned_text)
+
+        return cleaned_text
+
+    except Exception as e:
+        st.error(f"Error fetching content from URL: {str(e)}")
+        return ""
+
+
+# --- Clean web text from noise ---
+def clean_web_text(text):
+    unwanted_keywords = [
+        "All rights reserved",
+        "Privacy Policy",
+        "Cookie Policy",
+        "Like on Facebook",
+        "Contact Us",
+        "Copyright",
+        "Ads by Google"
+    ]
+    filtered_lines = [
+        line for line in text.split("\n") 
+        if not any(kw.lower() in line.lower() for kw in unwanted_keywords)
+    ]
+    return "\n".join(filtered_lines).strip()
+
+
+# --- Combined Text Extractor (Files + URL) ---
+def get_raw_text(files=None, url=None):
     raw_text = ""
-    for file in files:
-        try:
-            raw_text += get_text_from_file(file)
-        except Exception as e:
-            st.warning(f"Could not process file: {file.name} - {str(e)}")
+
+    # From files
+    if files:
+        for file in files:
+            try:
+                raw_text += get_text_from_file(file)
+            except Exception as e:
+                st.warning(f"Could not process file: {file.name} - {str(e)}")
+
+    # From general URL
+    if url.strip():
+        with st.spinner("Fetching content from website..."):
+            web_text = get_web_text(url)
+            if web_text:
+                raw_text += "\n\n---\n\nWebsite Content:\n" + web_text
+            else:
+                st.error("No usable content found at this URL.")
+
     return raw_text
 
 
@@ -117,18 +183,9 @@ def get_response(user_question):
 def clear_input():
     user_question = st.session_state.widget_input.strip()
     if user_question:
-        # Greeting Detection
-        greeting_keywords = ["hi", "hello", "hey", "good morning", "good afternoon", "is anyone there"]
-        is_greeting = any(word.lower() in user_question.lower() for word in greeting_keywords)
-
         st.session_state.conversation.append(("user", user_question))
-
-        if is_greeting:
-            bot_response = "Hello! 👋 I'm DocBot, here to help you explore your documents. How can I assist you today?"
-        else:
-            with st.spinner("Thinking..."):
-                bot_response = get_response(user_question)
-
+        with st.spinner("Thinking..."):
+            bot_response = get_response(user_question)
         st.session_state.conversation.append(("bot", bot_response))
     st.session_state.widget_input = ""
 
@@ -137,22 +194,26 @@ def main():
     st.set_page_config("Chat PDF using Gemini", layout="centered")
     st.markdown("<h1 style='text-align:center;'>📄 Chat with Docs using DocBot 💬</h1>", unsafe_allow_html=True)
 
-    # Sidebar for uploading files
+    # Sidebar for uploading files and link
     with st.sidebar:
         st.title("📚 Menu:")
+
         uploaded_files = st.file_uploader(
             "Upload PDF, Excel, CSV, or Word files",
             type=["pdf", "xlsx", "xls", "csv", "docx"],
             accept_multiple_files=True
         )
-        if st.button("Process Files"):
-            if not uploaded_files:
-                st.warning("Please upload at least one file.")
+
+        url_input = st.text_input("🌐 Or paste a public website link:", placeholder="https://example.com")    
+
+        if st.button("Process Files & Link"):
+            if not uploaded_files and not url_input.strip():
+                st.warning("Please upload at least one file OR enter a link.")
             else:
                 with st.spinner("Extracting text and building index..."):
-                    raw_text = get_pdf_text(uploaded_files)
+                    raw_text = get_raw_text(uploaded_files, url_input)
                     if not raw_text.strip():
-                        st.error("Could not extract text from the files. Make sure they are readable.")
+                        st.error("No usable content found in files or link.")
                     else:
                         text_chunks = get_text_chunks(raw_text)
                         get_vector_store(text_chunks)
@@ -160,15 +221,13 @@ def main():
 
     # Main chat interface
     if st.session_state.vectorstore_loaded:
-        st.markdown("### 💭 Ask a Question about your Documents")
+        st.markdown("### 💭 Ask a Question about your Documents or Content")
 
         # Scrollable chat container
         with st.container():
-            st.markdown('<div class="chat-container">', unsafe_allow_html=True)
             for role, message in st.session_state.conversation:
-                css_class = "user" if role == "user" else "bot"
-                st.markdown(f"<div class='chat-message {css_class}'>{message}</div>", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+                with st.chat_message(role):
+                    st.markdown(message)
 
         # Fixed input box at the bottom
         st.markdown('<div class="fixed-input">', unsafe_allow_html=True)
@@ -176,7 +235,8 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:
-        st.info("👈 Please upload and process a file first.")
+        st.info("👈 Please upload files or paste a link and click 'Process Files & Link'")
+
 
     # --- CSS Styles ---
     st.markdown("""
@@ -191,16 +251,6 @@ def main():
 
     h1 {
         color: #343a40;
-    }
-
-    /* Chat container */
-    .chat-container {
-        max-height: 60vh;
-        overflow-y: auto;
-        padding: 10px 20px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
     }
 
     /* Chat message bubbles */
@@ -219,11 +269,7 @@ def main():
         background-color: #d1ecf1;
         color: #040404;
         border: 1px solid #bee5eb;
-        margin-left: auto;
         text-align: right;
-        width: fit-content;
-        margin-bottom: 1rem;
-        
     }
 
     .chat-message.bot {
@@ -231,9 +277,6 @@ def main():
         background-color: #e2f0d9;
         color: #040404;
         border: 1px solid #c3e6cb;
-        width: fit-content;
-        margin-bottom: 1rem;
-        margin-right: auto;
     }
 
     /* Input area */
@@ -271,16 +314,6 @@ def main():
         z-index: 999;
         box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
         border-top: 1px solid #dee2e6;
-    }
-
-    @media screen and (max-width: 768px) {
-        .chat-message {
-            max-width: 90%;
-        }
-
-        .fixed-input {
-            padding: 10px 16px;
-        }
     }
     </style>
     """, unsafe_allow_html=True)
