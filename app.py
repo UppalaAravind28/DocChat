@@ -47,8 +47,19 @@ def get_vector_store(text_chunks):
 
 def get_conversational_chain():
     prompt_template = """
-    Answer the question as detailed as possible from the provided context. 
-    If the answer is not in the provided context, say: "The answer is not available in the context."
+    You are an AI assistant DocBot designed to answer questions based on the provided document content. 
+    Respond in a natural, conversational tone — as a helpful assistant would., precise, and fact-based AI assistant.
+    Your role is to provide clear and accurate answers solely based on the provided context.
+    Do not use any external knowledge beyond what is in the context.
+
+    If the context does not contain enough information to answer the question, respond with:
+    "The answer is not available in the context."
+
+    Follow these rules:
+    - Always base your answer strictly on the context.
+    - If the question requires multiple steps, explain each clearly.
+    - Use bullet points or numbered lists where appropriate.
+    - Keep your tone professional but easy to understand.
 
     Context:
     {context}
@@ -86,7 +97,7 @@ def clear_input():
 
 def main():
     st.set_page_config("Chat PDF using Gemini", layout="centered")
-    st.markdown("<h1 style='text-align:center;'>📄 Chat with PDF using Gemini 💬</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;'>📄 Chat with PDF using DocBot 💬</h1>", unsafe_allow_html=True)
 
     # Sidebar for uploading PDFs
     with st.sidebar:
