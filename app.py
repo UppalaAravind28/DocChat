@@ -22,20 +22,51 @@ if "vectorstore_loaded" not in st.session_state:
     st.session_state.vectorstore_loaded = False
 
 
-def get_pdf_text(pdf_docs):
-    text = ""
-    for pdf in pdf_docs:
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text
-    return text
+# --- NEW: Function to extract text from various file types ---
+def get_text_from_file(file):
+    file_extension = os.path.splitext(file.name)[1].lower()
+
+    if file_extension == ".pdf":
+        pdf_reader = PdfReader(file)
+        return "".join(page.extract_text() for page in pdf_reader.pages if page.extract_text())
+
+    elif file_extension in [".xlsx", ".xls"]:
+        import pandas as pd
+        df_dict = pd.read_excel(file, sheet_name=None)
+        full_text = ""
+        for sheet_name, df in df_dict.items():
+            full_text += f"\n\nSheet: {sheet_name}\n"
+            full_text += df.to_string(index=False)
+        return full_text
+
+    elif file_extension == ".csv":
+        import pandas as pd
+        df = pd.read_csv(file)
+        return df.to_string(index=False)
+
+    elif file_extension == ".docx":
+        from docx import Document
+        doc = Document(file)
+        return "\n".join(paragraph.text for paragraph in doc.paragraphs)
+
+    else:
+        raise ValueError(f"Unsupported file type: {file_extension}")
+
+
+# --- Modified: Accept all supported file types ---
+def get_pdf_text(files):
+    raw_text = ""
+    for file in files:
+        try:
+            raw_text += get_text_from_file(file)
+        except Exception as e:
+            st.warning(f"Could not process file: {file.name} - {str(e)}")
+    return raw_text
 
 
 def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
-    return text_splitter.split_text(text)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+    return splitter.split_text(text)
 
 
 def get_vector_store(text_chunks):
@@ -48,9 +79,7 @@ def get_vector_store(text_chunks):
 def get_conversational_chain():
     prompt_template = """
     You are an AI assistant DocBot designed to answer questions based on the provided document content. 
-    Respond in a natural, conversational tone — as a helpful assistant would., precise, and fact-based AI assistant.
-    Your role is to provide clear and accurate answers solely based on the provided context.
-    Do not use any external knowledge beyond what is in the context.
+    Respond in a natural, conversational tone — as a helpful assistant would.
 
     If the context does not contain enough information to answer the question, respond with:
     "The answer is not available in the context."
@@ -88,29 +117,42 @@ def get_response(user_question):
 def clear_input():
     user_question = st.session_state.widget_input.strip()
     if user_question:
+        # Greeting Detection
+        greeting_keywords = ["hi", "hello", "hey", "good morning", "good afternoon", "is anyone there"]
+        is_greeting = any(word.lower() in user_question.lower() for word in greeting_keywords)
+
         st.session_state.conversation.append(("user", user_question))
-        with st.spinner("Thinking..."):
-            response = get_response(user_question)
-        st.session_state.conversation.append(("bot", response))
+
+        if is_greeting:
+            bot_response = "Hello! 👋 I'm DocBot, here to help you explore your documents. How can I assist you today?"
+        else:
+            with st.spinner("Thinking..."):
+                bot_response = get_response(user_question)
+
+        st.session_state.conversation.append(("bot", bot_response))
     st.session_state.widget_input = ""
 
 
 def main():
     st.set_page_config("Chat PDF using Gemini", layout="centered")
-    st.markdown("<h1 style='text-align:center;'>📄 Chat with PDF using DocBot 💬</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;'>📄 Chat with Docs using DocBot 💬</h1>", unsafe_allow_html=True)
 
-    # Sidebar for uploading PDFs
+    # Sidebar for uploading files
     with st.sidebar:
         st.title("📚 Menu:")
-        pdf_docs = st.file_uploader("Upload your PDF Files and click on 'Process'", accept_multiple_files=True)
-        if st.button("Process PDF(s)"):
-            if not pdf_docs:
-                st.warning("Please upload at least one PDF file.")
+        uploaded_files = st.file_uploader(
+            "Upload PDF, Excel, CSV, or Word files",
+            type=["pdf", "xlsx", "xls", "csv", "docx"],
+            accept_multiple_files=True
+        )
+        if st.button("Process Files"):
+            if not uploaded_files:
+                st.warning("Please upload at least one file.")
             else:
                 with st.spinner("Extracting text and building index..."):
-                    raw_text = get_pdf_text(pdf_docs)
+                    raw_text = get_pdf_text(uploaded_files)
                     if not raw_text.strip():
-                        st.error("Could not extract text from the PDF(s). Make sure they are text-based (not scanned images).")
+                        st.error("Could not extract text from the files. Make sure they are readable.")
                     else:
                         text_chunks = get_text_chunks(raw_text)
                         get_vector_store(text_chunks)
@@ -118,7 +160,7 @@ def main():
 
     # Main chat interface
     if st.session_state.vectorstore_loaded:
-        st.markdown("### 💭 Ask a Question about your PDF")
+        st.markdown("### 💭 Ask a Question about your Documents")
 
         # Scrollable chat container
         with st.container():
@@ -134,7 +176,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:
-        st.info("👈 Please upload and process a PDF file first.")
+        st.info("👈 Please upload and process a file first.")
 
     # --- CSS Styles ---
     st.markdown("""
@@ -165,37 +207,33 @@ def main():
     .chat-message {
         padding: 12px 16px;
         border-radius: 20px;
-        max-width: 75%;
         word-wrap: break-word;
         line-height: 1.5;
         font-size: 15px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }
-    
-    .chat-message.user, .chat-message.bot{
-        width: fit-content;
-        padding: 1rem;
-        border-radius: 12px;
-        argin-bottom: 1rem;
         max-width: 75%;
-        line-height: 1.5;
     }
 
     .chat-message.user {
         align-self: flex-end;
         background-color: #d1ecf1;
         color: #040404;
+        border: 1px solid #bee5eb;
         margin-left: auto;
         text-align: right;
-        border: 1px solid #bee5eb;
+        width: fit-content;
+        margin-bottom: 1rem;
+        
     }
 
     .chat-message.bot {
         align-self: flex-start;
         background-color: #e2f0d9;
         color: #040404;
-        margin-right: auto;
         border: 1px solid #c3e6cb;
+        width: fit-content;
+        margin-bottom: 1rem;
+        margin-right: auto;
     }
 
     /* Input area */
@@ -228,13 +266,13 @@ def main():
         bottom: 0;
         left: 0;
         right: 0;
+        background-color: #39547E;
         padding: 12px 20px;
-        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
-        border-top: 1px solid #dee2e6;
         z-index: 999;
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        border-top: 1px solid #dee2e6;
     }
 
-    /* Responsive adjustments */
     @media screen and (max-width: 768px) {
         .chat-message {
             max-width: 90%;
