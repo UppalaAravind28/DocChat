@@ -13,6 +13,7 @@ Built using:
 - 📁 Support for multiple file types + web scraping
 
 Perfect for students, researchers, professionals, and developers who want to get insights from complex documents quickly and accurately.
+- DocChat Live link : (https://docchatt.streamlit.app/)
 
 ---
 
@@ -182,6 +183,7 @@ You can deploy this app online using any of the following platforms:
 - Set environment variables in **Settings > Secrets**
 
 > ✅ Fastest way to host a Streamlit app for free
+- DocChat Live link : (https://docchatt.streamlit.app/)
 
 ---
 
