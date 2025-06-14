@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from docx import Document
 import pandas as pd
 from langchain_community.document_loaders import WebBaseLoader
+from io import StringIO
 
 
 # Load environment variables
@@ -24,9 +25,9 @@ if "conversation" not in st.session_state:
     st.session_state.conversation = []
 if "vectorstore_loaded" not in st.session_state:
     st.session_state.vectorstore_loaded = False
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-
-# --- Function to extract text from various file types ---
 def get_text_from_file(file):
     file_extension = os.path.splitext(file.name)[1].lower()
 
@@ -54,7 +55,6 @@ def get_text_from_file(file):
         raise ValueError(f"Unsupported file type: {file_extension}")
 
 
-# --- Get text from web URL using WebBaseLoader ---
 def get_web_text(url):
     try:
         loader = WebBaseLoader(url)
@@ -65,11 +65,9 @@ def get_web_text(url):
         return ""
 
 
-# --- Combined Text Extractor (Files + URL) ---
 def get_raw_text(files=None, url=None):
     raw_text = ""
 
-    # From files
     if files:
         for file in files:
             try:
@@ -77,7 +75,6 @@ def get_raw_text(files=None, url=None):
             except Exception as e:
                 st.warning(f"Could not process file: {file.name} - {str(e)}")
 
-    # From general URL
     if url.strip():
         with st.spinner("Fetching content from website..."):
             web_text = get_web_text(url)
@@ -108,11 +105,11 @@ def get_conversational_chain():
 
     Use the following rules:
     - Always base your answer strictly on the context.
-    - Format answers with bullet points, numbered lists, tables and clear paragraphs.
+    - Format answers with bullet points, numbered lists, tables, and clear paragraphs.
     - When appropriate, use emojis to make the response more engaging.
     - Avoid markdown syntax if possible, but use it when needed for structure.
     - Keep your tone professional but friendly.
-    - If the output contains the data along with data organize in table format for better presentation.
+    - If the output contains data, organize it into table format for better presentation.
 
     Context:
     {context}
@@ -152,18 +149,24 @@ def main():
     st.set_page_config("Chat PDF using Gemini", layout="centered")
     st.markdown("<h1 style='text-align:center;'>📄 Chat with Docs using DocBot 💬</h1>", unsafe_allow_html=True)
 
-    # Sidebar for uploading files and links
+    # Sidebar Navigation Panel
     with st.sidebar:
         st.title("📚 Menu:")
 
+        # --- File Upload Section ---
+        st.markdown("### 📁 Upload Files")
         uploaded_files = st.file_uploader(
             "Upload PDF, Excel, CSV, or Word files",
             type=["pdf", "xlsx", "xls", "csv", "docx"],
-            accept_multiple_files=True
+            accept_multiple_files=True,
+            key="file_uploader"
         )
 
-        url_input = st.text_input("🌐 Or paste a public website link:", placeholder="https://example.com")    
+        # --- Web Link Input ---
+        st.markdown("### 🔗 Paste a Website Link")
+        url_input = st.text_input("Enter any public link:", placeholder="https://example.com",  key="url_input")
 
+        # --- Process Button ---
         if st.button("Process Files & Link"):
             if not uploaded_files and not url_input.strip():
                 st.warning("Please upload at least one file OR enter a link.")
@@ -175,9 +178,10 @@ def main():
                 else:
                     text_chunks = get_text_chunks(raw_text)
                     get_vector_store(text_chunks)
-                    st.success("Done")
+                    st.success("✅ Done! Ready to answer questions.")
 
-    # Main chat interface
+
+    # Main Chat Interface
     if st.session_state.vectorstore_loaded:
         st.markdown("### 💭 Ask a Question about your Documents or Content")
 
@@ -190,14 +194,45 @@ def main():
                     else:
                         st.markdown(message.replace("Answer:", "🤖 **DocBot:**"))
 
-        # Fixed input box at the bottom
+        # Fixed input box + buttons below it
         st.markdown('<div class="fixed-input">', unsafe_allow_html=True)
         st.text_input("Your question:", key="widget_input", placeholder="Type your question here....", on_change=clear_input)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("📥 Download Chat", use_container_width=True):
+                if st.session_state.conversation:
+                    conversation_str = "\n\n".join([f"{role}: {msg}" for role, msg in st.session_state.conversation])
+                    st.download_button("Download", data=conversation_str, file_name="chat_history.txt", mime="text/plain")
+                else:
+                    st.info("No conversation history to download yet.")
+
+        with col2:
+            if st.button("🔄 Clear Chat", use_container_width=True):
+                st.session_state.conversation = []
+                st.session_state.vectorstore_loaded = False
+
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:
         st.info("👈 Please upload files or paste a link and click 'Process Files & Link'")
-        
+        # --- How to Use Guide ---
+        st.markdown("---")
+        with st.expander("❓ How to Use This Bot"):
+            st.markdown("""
+            - Click on the side menu. Having a symbol like this  >  top of the left side.
+            - Upload PDFs, Excel, Word docs, or CSV files
+            - Or paste a public website link
+            - Click **Process Files & Link**
+            - Ask any question!
+
+            ### Supported Formats
+            - ✅ PDF, ✅ Excel (.xlsx/.xls), ✅ CSV, ✅ Word (.docx)
+            - 🔗 Public websites via link
+            """)
+
+
     # --- CSS Styles ---
     st.markdown("""
     <style>
@@ -277,6 +312,10 @@ def main():
     }
     </style>
     """, unsafe_allow_html=True)
+
+
+def get_processed_text():
+    return getattr(st.session_state, "processed_text", "No text processed yet")
 
 
 if __name__ == "__main__":
