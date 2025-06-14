@@ -11,8 +11,7 @@ from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 from docx import Document
 import pandas as pd
-from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from langchain_community.document_loaders import WebBaseLoader
 
 
 # Load environment variables
@@ -55,55 +54,15 @@ def get_text_from_file(file):
         raise ValueError(f"Unsupported file type: {file_extension}")
 
 
-# --- Get text from web URL using Playwright + BeautifulSoup ---
+# --- Get text from web URL using WebBaseLoader ---
 def get_web_text(url):
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, timeout=60000)
-            page.wait_for_timeout(5000)  # Wait for JS content
-            html = page.content()
-            browser.close()
-
-        # Use BeautifulSoup to clean HTML
-        soup = BeautifulSoup(html, "html.parser")
-
-        # Remove scripts, styles, ads, banners, etc.
-        for script_or_style in soup(["script", "style", "nav", "footer", ".ad-banner", ".login-prompt"]):
-            script_or_style.decompose()
-
-        # Extract visible text
-        text = soup.get_text(separator="\n")
-        lines = (line.strip() for line in text.splitlines())
-        cleaned_text = '\n'.join(line for line in lines if line)
-
-        # Optional: Custom cleaning for specific websites
-        cleaned_text = clean_web_text(cleaned_text)
-
-        return cleaned_text
-
+        loader = WebBaseLoader(url)
+        docs = loader.load()
+        return "\n".join([doc.page_content for doc in docs])
     except Exception as e:
         st.error(f"Error fetching content from URL: {str(e)}")
         return ""
-
-
-# --- Clean web text from noise ---
-def clean_web_text(text):
-    unwanted_keywords = [
-        "All rights reserved",
-        "Privacy Policy",
-        "Cookie Policy",
-        "Like on Facebook",
-        "Contact Us",
-        "Copyright",
-        "Ads by Google"
-    ]
-    filtered_lines = [
-        line for line in text.split("\n") 
-        if not any(kw.lower() in line.lower() for kw in unwanted_keywords)
-    ]
-    return "\n".join(filtered_lines).strip()
 
 
 # --- Combined Text Extractor (Files + URL) ---
@@ -122,10 +81,7 @@ def get_raw_text(files=None, url=None):
     if url.strip():
         with st.spinner("Fetching content from website..."):
             web_text = get_web_text(url)
-            if web_text:
-                raw_text += "\n\n---\n\nWebsite Content:\n" + web_text
-            else:
-                st.error("No usable content found at this URL.")
+            raw_text += web_text
 
     return raw_text
 
@@ -172,11 +128,6 @@ def get_conversational_chain():
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     return chain
 
-    model = ChatGoogleGenerativeAI(model="gemini-2.0-flash-lite", temperature=0.3)
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-    return chain
-
 
 def get_response(user_question):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
@@ -201,7 +152,7 @@ def main():
     st.set_page_config("Chat PDF using Gemini", layout="centered")
     st.markdown("<h1 style='text-align:center;'>📄 Chat with Docs using DocBot 💬</h1>", unsafe_allow_html=True)
 
-    # Sidebar for uploading files and link
+    # Sidebar for uploading files and links
     with st.sidebar:
         st.title("📚 Menu:")
 
@@ -219,12 +170,12 @@ def main():
             else:
                 with st.spinner("Extracting text and building index..."):
                     raw_text = get_raw_text(uploaded_files, url_input)
-                    if not raw_text.strip():
-                        st.error("No usable content found in files or link.")
-                    else:
-                        text_chunks = get_text_chunks(raw_text)
-                        get_vector_store(text_chunks)
-                        st.success("Done")
+                if not raw_text.strip():
+                    st.error("No usable content found in files or link.")
+                else:
+                    text_chunks = get_text_chunks(raw_text)
+                    get_vector_store(text_chunks)
+                    st.success("Done")
 
     # Main chat interface
     if st.session_state.vectorstore_loaded:
@@ -234,7 +185,10 @@ def main():
         with st.container():
             for role, message in st.session_state.conversation:
                 with st.chat_message(role):
-                    st.markdown(message)
+                    if role == "user":
+                        st.markdown(f"🧑‍💻 {message}")
+                    else:
+                        st.markdown(message.replace("Answer:", "🤖 **DocBot:**"))
 
         # Fixed input box at the bottom
         st.markdown('<div class="fixed-input">', unsafe_allow_html=True)
@@ -243,8 +197,7 @@ def main():
 
     else:
         st.info("👈 Please upload files or paste a link and click 'Process Files & Link'")
-
-
+        
     # --- CSS Styles ---
     st.markdown("""
     <style>
