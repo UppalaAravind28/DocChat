@@ -151,7 +151,7 @@ source venv/bin/activate   # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### ✅ Sample `requirements.txt`
+### ✅ `requirements.txt`
 
 ```txt
 streamlit==1.29.0
