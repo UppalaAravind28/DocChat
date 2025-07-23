@@ -6,6 +6,8 @@
 
 DocBot is an **AI-powered document assistant** that lets you upload documents or paste web links and ask questions — it will find answers using natural language processing and semantic search.
 
+
+
 Built using:
 - 🔐 Google Gemini LLM (via LangChain)
 - 🧠 FAISS vector store for fast similarity search
@@ -43,6 +45,8 @@ Perfect for students, researchers, professionals, and developers who want to get
 ---
 
 ## 🛠️ How It Works
+
+<img width="2042" height="1194" alt="DocBot" src="https://github.com/user-attachments/assets/d760da86-ad05-4222-a4b8-ac5e45f8b47b" />
 
 ### 1. Upload Files or Paste a Link  
 Users can upload one or more files (PDF/Excel/Word/CSV) or paste a **public website URL**
